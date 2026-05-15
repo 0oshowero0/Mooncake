@@ -2837,7 +2837,7 @@ void Client::StorageHeartbeatThreadMain() {
 
         // Ping master
 
-        LOG(INFO) << "Pinging to master " << current_master_address;
+        LOG(INFO) << "Pinging to master";
         auto start_time = std::chrono::system_clock::now();
         auto ping_result = master_client_.Ping();
         auto end_time = std::chrono::system_clock::now();
