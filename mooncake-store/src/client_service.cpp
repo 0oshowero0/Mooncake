@@ -2838,21 +2838,22 @@ void Client::StorageHeartbeatThreadMain() {
         // Ping master
 
         LOG(INFO) << "Pinging to master";
-        auto start_time = std::chrono::system_clock::now();
+        auto wall_start = std::chrono::system_clock::now();
+        auto mono_start = std::chrono::steady_clock::now();
         auto ping_result = master_client_.Ping();
-        auto end_time = std::chrono::system_clock::now();
+        auto mono_end = std::chrono::steady_clock::now();
+        auto wall_end = std::chrono::system_clock::now();
 
         auto start_timestamp_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
-            start_time.time_since_epoch()).count();
+            wall_start.time_since_epoch()).count();
         auto end_timestamp_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
-            end_time.time_since_epoch()).count();
-
-        auto duration_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
-            end_time - start_time).count();
+            wall_end.time_since_epoch()).count();
+        auto duration_us = std::chrono::duration_cast<std::chrono::microseconds>(
+            mono_end - mono_start).count();
 
         LOG(INFO) << "Ping metrics - Start TS: " << start_timestamp_ms << " ms"
                   << ", End TS: " << end_timestamp_ms << " ms"
-                  << ", Duration: " << duration_ms << " ms";
+                  << ", Duration: " << duration_us << " us";
 
 
         if (ping_result) {
