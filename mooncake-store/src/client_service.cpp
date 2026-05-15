@@ -2836,7 +2836,25 @@ void Client::StorageHeartbeatThreadMain() {
         }
 
         // Ping master
+
+        LOG(INFO) << "Pinging to master " << current_master_address;
+        auto start_time = std::chrono::system_clock::now();
         auto ping_result = master_client_.Ping();
+        auto end_time = std::chrono::system_clock::now();
+
+        auto start_timestamp_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+            start_time.time_since_epoch()).count();
+        auto end_timestamp_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+            end_time.time_since_epoch()).count();
+
+        auto duration_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+            end_time - start_time).count();
+
+        LOG(INFO) << "Ping metrics - Start TS: " << start_timestamp_ms << " ms"
+                  << ", End TS: " << end_timestamp_ms << " ms"
+                  << ", Duration: " << duration_ms << " ms";
+
+
         if (ping_result) {
             // Reset ping failure count
             ping_fail_count = 0;
