@@ -17,6 +17,13 @@
 #include "master_metric_manager.h"
 #include "version.h"
 
+// Timing structure for RPC slow-path analysis (used for Ping diagnostics)
+struct RpcTimingInfo {
+    std::chrono::steady_clock::time_point lambda_created;
+    std::chrono::steady_clock::time_point pool_started;
+    std::chrono::steady_clock::time_point rpc_completed;
+};
+
 namespace mooncake {
 
 template <auto Method>
@@ -267,11 +274,18 @@ tl::expected<ReturnType, ErrorCode> MasterClient::invoke_rpc(Args&&... args) {
     }
 
     auto start_time = std::chrono::steady_clock::now();
+
+    // Timing structure shared between lambda and outer coroutine scope.
+    // Used to diagnose slow Ping requests without flooding logs for other RPCs.
+    auto timing = std::make_shared<RpcTimingInfo>();
+    timing->lambda_created = start_time;
+
     return async_simple::coro::syncAwait(
         [&]() -> async_simple::coro::Lazy<tl::expected<ReturnType, ErrorCode>> {
             auto ret = co_await pool->send_request(
-                [&](coro_io::client_reuse_hint,
-                    coro_rpc::coro_rpc_client& client) {
+                [&, timing](coro_io::client_reuse_hint,
+                            coro_rpc::coro_rpc_client& client) {
+                    timing->pool_started = std::chrono::steady_clock::now();
                     return client.send_request<ServiceMethod>(
                         std::forward<Args>(args)...);
                 });
@@ -280,10 +294,31 @@ tl::expected<ReturnType, ErrorCode> MasterClient::invoke_rpc(Args&&... args) {
                 co_return tl::make_unexpected(ErrorCode::RPC_FAIL);
             }
             auto result = co_await std::move(ret.value());
+            timing->rpc_completed = std::chrono::steady_clock::now();
             if (!result) {
                 LOG(ERROR) << "RPC call failed: " << result.error().msg;
                 co_return tl::make_unexpected(ErrorCode::RPC_FAIL);
             }
+
+            // Only log detailed timing for Ping when total latency exceeds 3ms.
+            constexpr bool is_ping_rpc =
+                std::is_same_v<
+                    std::remove_cvref_t<decltype(ServiceMethod)>,
+                    std::remove_cvref_t<decltype(&WrappedMasterService::Ping)>>;
+            if constexpr (is_ping_rpc) {
+                auto total_us = std::chrono::duration_cast<std::chrono::microseconds>(
+                    timing->rpc_completed - timing->lambda_created).count();
+                if (total_us > 3000) {  // 3ms threshold
+                    auto schedule_us = std::chrono::duration_cast<std::chrono::microseconds>(
+                        timing->pool_started - timing->lambda_created).count();
+                    auto rpc_us = std::chrono::duration_cast<std::chrono::microseconds>(
+                        timing->rpc_completed - timing->pool_started).count();
+                    LOG(INFO) << "[PingSlowPath] schedule=" << schedule_us
+                              << "us, rpc_roundtrip=" << rpc_us
+                              << "us, total=" << total_us << "us";
+                }
+            }
+
             if (metrics_) {
                 auto end_time = std::chrono::steady_clock::now();
                 auto latency =
